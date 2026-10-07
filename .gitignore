@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.pyc
+
+# Large raw data dumps (kept locally, seed CSV tracked)
+public/data/
+supabase/data/cases.csv
+supabase/data/evidenskart.csv
