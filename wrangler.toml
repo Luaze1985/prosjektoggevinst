@@ -1,0 +1,3 @@
+name = "prosjektoggevinst-proxy"
+main = "proxy/worker.js"
+compatibility_date = "2026-10-08"
