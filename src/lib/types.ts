@@ -64,3 +64,36 @@ export interface EvalueringResultat {
 }
 
 export type EvalueringRespons = EvalueringResultat;
+
+// 5-Stegs Trakt & Sensor Typer
+export type PortvaktId = 'eier' | 'baseline' | 'ikkeKi' | 'data' | 'kontroll' | 'juss' | 'test';
+export type SvarVerdi = 'ja' | 'vet_ikke' | 'nei';
+export type Svar = Record<PortvaktId, SvarVerdi>;
+
+export interface SensorInput {
+  dagensSituasjon: string;
+  foreslaattLosning: string;
+  eierSektorEffekt: string;
+  svar?: Partial<Svar>;
+  caser?: ReferanseCase[];
+}
+
+export interface SensorResultat {
+  kilde: 'openai' | 'lokal';
+  konklusjon: string;
+  styrker: string[];
+  gap: string[];
+  testoppsett: string[];
+  domene?: string;
+  fallbackGrunn?: string;
+}
+
+export interface HandoffPakke {
+  input: SensorInput;
+  svar: Svar;
+  dom: { antallJa: number; niva: 'klar' | 'betinget' | 'forankre'; tittel: string };
+  sensor: SensorResultat;
+  ukeoppgaver: { id: string; tittel: string; tekst: string }[];
+  gevinst?: GevinstBeregning;
+  modenhet?: { trinn: number; navn: string; score: number };
+}
