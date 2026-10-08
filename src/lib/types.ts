@@ -79,7 +79,7 @@ export interface SensorInput {
 }
 
 export interface SensorResultat {
-  kilde: 'openai' | 'lokal' | 'bruker_innlimt';
+  kilde: 'openai' | 'lokal' | 'bruker_innlimt' | 'openai_proxy';
   konklusjon: string;
   styrker: string[];
   gap: string[];

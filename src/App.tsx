@@ -122,6 +122,16 @@ export default function App() {
   const [apiKeyInput, setApiKeyInput] = useState(apiKey);
   const [lagretNokkelMelding, setLagretNokkelMelding] = useState(false);
 
+  // Student-proxy URL (for zero-friction bruk i klasserommet)
+  const [proxyUrl, setProxyUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('student_proxy_url') || (import.meta as any).env?.VITE_STUDENT_PROXY_URL || '';
+    } catch {
+      return '';
+    }
+  });
+  const [proxyUrlInput, setProxyUrlInput] = useState(proxyUrl);
+
   const lagreApiKey = (nyNokkel: string) => {
     const renset = nyNokkel.trim();
     setApiKey(renset);
@@ -130,6 +140,22 @@ export default function App() {
         localStorage.setItem('openai_api_key', renset);
       } else {
         localStorage.removeItem('openai_api_key');
+      }
+      setLagretNokkelMelding(true);
+      setTimeout(() => setLagretNokkelMelding(false), 2500);
+    } catch {
+      // ignore
+    }
+  };
+
+  const lagreProxyUrl = (nyUrl: string) => {
+    const renset = nyUrl.trim();
+    setProxyUrl(renset);
+    try {
+      if (renset) {
+        localStorage.setItem('student_proxy_url', renset);
+      } else {
+        localStorage.removeItem('student_proxy_url');
       }
       setLagretNokkelMelding(true);
       setTimeout(() => setLagretNokkelMelding(false), 2500);
@@ -198,9 +224,10 @@ export default function App() {
   const matchedeCaser = rangerCaser(samletInputTekst, caser, 3);
   const antallTreffIDb = tellTreff(samletInputTekst, caser);
 
-  // Kjøring av sensor til Steg 4
-  const kjoerDirekteSensor = async (nokkelTilBruk?: string) => {
+  // Kjøring av sensor til Steg 4 (direkte API eller student-proxy)
+  const kjoerDirekteSensor = async (nokkelTilBruk?: string, overstyrtProxy?: string) => {
     const aktivNokkel = (nokkelTilBruk !== undefined ? nokkelTilBruk : apiKey).trim();
+    const aktivProxy = (overstyrtProxy !== undefined ? overstyrtProxy : proxyUrl).trim();
     setLasterSensor(true);
     try {
       const res = await evaluerSensor({
@@ -211,10 +238,11 @@ export default function App() {
           svar,
           caser: matchedeCaser
         },
-        apiKey: aktivNokkel
+        apiKey: aktivNokkel,
+        proxyUrl: aktivProxy
       });
       setSensor(res);
-      setSisteKjorteNokkel(JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: aktivNokkel }));
+      setSisteKjorteNokkel(JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: aktivNokkel, proxyUrl: aktivProxy }));
     } catch {
       const fallback = lokalSensorFallback({
         dagensSituasjon,
@@ -231,7 +259,7 @@ export default function App() {
 
   const gaaTilSensor = async () => {
     setSteg(4);
-    const gjeldendeNokkel = JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: apiKey.trim() });
+    const gjeldendeNokkel = JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: apiKey.trim(), proxyUrl: proxyUrl.trim() });
     if (gjeldendeNokkel !== sisteKjorteNokkel || !sensor) {
       await kjoerDirekteSensor();
     }
@@ -318,6 +346,8 @@ export default function App() {
     const dato = new Intl.DateTimeFormat('nb-NO', { dateStyle: 'long' }).format(new Date());
     const kildeNavn = sensor?.kilde === 'openai'
       ? 'OpenAI gpt-4o-mini (direkte)'
+      : sensor?.kilde === 'openai_proxy'
+      ? 'OpenAI gpt-4o-mini (via student-proxy)'
       : sensor?.kilde === 'bruker_innlimt'
       ? 'ChatGPT / Claude (bruker-innlimt)'
       : 'Lokal regelmotor';
@@ -399,29 +429,30 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                 Business Case-screening
               </h1>
               <p className="mt-1 text-xs text-slate-500">
-                100 % uavhengig verktøy • {apiKey.trim() ? 'OpenAI gpt-4o-mini aktiv' : 'Lokal regelmotor (0 kr, offline)'}
+                100 % uavhengig verktøy • {apiKey.trim() ? 'OpenAI gpt-4o-mini (direkte nøkkel)' : proxyUrl.trim() ? 'Student-proxy aktiv (0 kr for studenten)' : 'Lokal regelmotor (0 kr, offline)'}
               </p>
             </div>
             <button
               type="button"
               onClick={() => {
                 setApiKeyInput(apiKey);
+                setProxyUrlInput(proxyUrl);
                 setVisInnstillinger(!visInnstillinger);
               }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              title="Innstillinger for API-nøkkel"
+              title="Innstillinger for API-nøkkel og student-proxy"
             >
               <Settings className="h-4 w-4 text-slate-500" />
-              <span>{apiKey.trim() ? 'Nøkkel aktiv' : 'Innstillinger'}</span>
+              <span>{apiKey.trim() || proxyUrl.trim() ? 'Tilkobling aktiv' : 'Innstillinger'}</span>
             </button>
           </div>
 
-          {/* Innstillingspanel for OpenAI API-nøkkel */}
+          {/* Innstillingspanel for OpenAI API-nøkkel og Student-Proxy */}
           {visInnstillinger && (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <span className="font-semibold text-slate-900 flex items-center gap-1.5">
-                  <Key className="h-3.5 w-3.5 text-blue-600" /> OpenAI API-nøkkel (valgfri)
+                  <Settings className="h-4 w-4 text-blue-600" /> Innstillinger for KI-tilkobling
                 </span>
                 <button
                   type="button"
@@ -431,44 +462,97 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <p className="text-slate-600">
-                Nøkkelen lagres kun lokalt i din egen nettleser (localStorage) og sendes aldri til eksterne skytjenester eller Lovable.
-                Lar du feltet stå tomt, kjører hele appen gratis på den innebygde deterministiske regelmotoren (0 kr, 0 Lovable-credits).
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  placeholder="sk-proj-..."
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-mono text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    lagreApiKey(apiKeyInput);
-                    setVisInnstillinger(false);
-                  }}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700"
-                >
-                  Lagre
-                </button>
-                {apiKey && (
+
+              {/* Seksjon 1: Felles Student-Proxy URL */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" /> Felles Student-Proxy URL (anbefalt for klasserommet)
+                  </span>
+                  {proxyUrl && <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded">Aktiv</span>}
+                </div>
+                <p className="text-slate-600 text-[11px]">
+                  Peker til en sikker Cloudflare Worker som holder din OpenAI-nøkkel hemmelig med rate-limit. Lar alle studenter trykke «Kjør KI-vurdering» uten å opprette konto eller taste inn nøkkel.
+                </p>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    type="url"
+                    placeholder="https://prosjektoggevinst-proxy.ditt-navn.workers.dev"
+                    value={proxyUrlInput}
+                    onChange={(e) => setProxyUrlInput(e.target.value)}
+                    className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-mono text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
                   <button
                     type="button"
                     onClick={() => {
-                      lagreApiKey('');
-                      setApiKeyInput('');
+                      lagreProxyUrl(proxyUrlInput);
                       setVisInnstillinger(false);
                     }}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-rose-600 hover:bg-rose-50"
+                    className="rounded-lg bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800"
                   >
-                    Fjern
+                    Lagre
                   </button>
-                )}
+                  {proxyUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        lagreProxyUrl('');
+                        setProxyUrlInput('');
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-rose-600 hover:bg-rose-50"
+                    >
+                      Fjern
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Seksjon 2: Egen privat OpenAI API-nøkkel */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <Key className="h-3.5 w-3.5 text-blue-600" /> Egen OpenAI API-nøkkel (valgfri for lærer / privat)
+                  </span>
+                  {apiKey && <span className="text-[10px] text-blue-700 font-semibold bg-blue-100 px-1.5 py-0.5 rounded">Aktiv</span>}
+                </div>
+                <p className="text-slate-600 text-[11px]">
+                  Lagres kun lokalt i din egen nettleser (localStorage) og overstyrer student-proxyen.
+                </p>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    type="password"
+                    placeholder="sk-proj-..."
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-mono text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      lagreApiKey(apiKeyInput);
+                      setVisInnstillinger(false);
+                    }}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700"
+                  >
+                    Lagre
+                  </button>
+                  {apiKey && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        lagreApiKey('');
+                        setApiKeyInput('');
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-rose-600 hover:bg-rose-50"
+                    >
+                      Fjern
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {lagretNokkelMelding && (
-                <p className="text-emerald-600 font-medium">✓ Innstillinger oppdatert!</p>
+                <p className="text-emerald-600 font-medium text-xs">✓ Innstillinger oppdatert!</p>
               )}
             </div>
           )}
@@ -973,27 +1057,40 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                {/* SPOR 1: DIREKTE I NETTLESEREN MED OPENAI */}
+                {/* SPOR 1: DIREKTE I NETTLESEREN MED OPENAI ELLER STUDENT-PROXY */}
                 <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3 flex flex-col justify-between">
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <Key className="h-3.5 w-3.5 text-blue-600" /> Spor 1: Direkte med OpenAI API
+                        <Key className="h-3.5 w-3.5 text-blue-600" />
+                        {apiKey.trim()
+                          ? 'Spor 1: Egen OpenAI API-nøkkel'
+                          : proxyUrl.trim()
+                          ? 'Spor 1: Felles Student-Proxy'
+                          : 'Spor 1: Direkte API / Student-Proxy'}
                       </span>
-                      {apiKey.trim() && (
-                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
-                          Nøkkel aktiv
+                      {apiKey.trim() ? (
+                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded">
+                          Egen nøkkel aktiv
                         </span>
-                      )}
+                      ) : proxyUrl.trim() ? (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
+                          Student-proxy aktiv (0 kr)
+                        </span>
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-600">
-                      Kjører mot <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">gpt-4o-mini</code> rett i din nettleser (lagres lokalt i localStorage).
+                      {apiKey.trim()
+                        ? 'Kjører mot OpenAI gpt-4o-mini med din egen API-nøkkel lagret lokalt.'
+                        : proxyUrl.trim()
+                        ? 'Kjører via felles Cloudflare Worker-proxy. 100 % gratis og umiddelbart for studenten.'
+                        : 'Kjør med OpenAI gpt-4o-mini. Legg inn API-nøkkel eller student-proxy URL under.'}
                     </p>
-                    {!apiKey.trim() && (
+                    {!apiKey.trim() && !proxyUrl.trim() && (
                       <div className="pt-1">
                         <input
                           type="password"
-                          placeholder="Lim inn OpenAI API-nøkkel (sk-proj-...)"
+                          placeholder="Lim inn OpenAI API-nøkkel (sk-proj-...) eller Worker URL"
                           value={apiKeyInput}
                           onChange={(e) => setApiKeyInput(e.target.value)}
                           className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1006,20 +1103,32 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     type="button"
                     disabled={lasterSensor}
                     onClick={() => {
-                      if (!apiKey.trim() && apiKeyInput.trim()) {
-                        lagreApiKey(apiKeyInput);
+                      if (!apiKey.trim() && !proxyUrl.trim() && apiKeyInput.trim()) {
+                        if (apiKeyInput.trim().startsWith('http')) {
+                          lagreProxyUrl(apiKeyInput.trim());
+                          kjoerDirekteSensor(undefined, apiKeyInput.trim());
+                        } else {
+                          lagreApiKey(apiKeyInput.trim());
+                          kjoerDirekteSensor(apiKeyInput.trim());
+                        }
+                      } else {
+                        kjoerDirekteSensor();
                       }
-                      kjoerDirekteSensor(apiKey.trim() || apiKeyInput.trim());
                     }}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
                   >
                     {lasterSensor ? (
                       <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyserer med OpenAI…
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyserer med KI…
                       </>
                     ) : (
                       <>
-                        <Sparkles className="h-3.5 w-3.5" /> Kjør OpenAI-vurdering
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {apiKey.trim()
+                          ? 'Kjør OpenAI-vurdering (egen nøkkel)'
+                          : proxyUrl.trim()
+                          ? 'Kjør KI-vurdering (via student-proxy)'
+                          : 'Kjør KI-vurdering'}
                       </>
                     )}
                   </button>
@@ -1123,6 +1232,8 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     <span className="font-semibold text-slate-600 lowercase bg-white/90 px-2.5 py-0.5 rounded border border-blue-200">
                       {sensor.kilde === 'openai'
                         ? 'OpenAI gpt-4o-mini (direkte)'
+                        : sensor.kilde === 'openai_proxy'
+                        ? 'OpenAI gpt-4o-mini (via student-proxy)'
                         : sensor.kilde === 'bruker_innlimt'
                         ? 'ChatGPT / Claude (bruker-innlimt)'
                         : 'Lokal regelmotor (0 kr)'}

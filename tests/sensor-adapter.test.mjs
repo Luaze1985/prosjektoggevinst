@@ -328,3 +328,71 @@ test('Bruker-innlimt resultat: parser råtekst til strukturert SensorResultat', 
   assert.equal(res.raatekst, raatekst);
 });
 
+// 9. Test Student-Proxy (Cloudflare Worker): Vellykket proxy-evaluering
+test('Student-Proxy: Vellykket evaluering via proxyUrl', async () => {
+  const input = {
+    dagensSituasjon: 'Kommune bruker 40 t/uke på manuelle søknader.',
+    foreslaattLosning: 'KI-assistert sortering med saksbehandlerkontroll.',
+    eierSektorEffekt: 'Kommunesjefen er formell prosesseier.',
+    svar: { eier: 'ja', baseline: 'ja', ikkeKi: 'ja', data: 'ja', kontroll: 'ja', juss: 'ja', test: 'ja' }
+  };
+
+  let kaltUrl = '';
+  const mockPoster = async (url, opts) => {
+    kaltUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        kilde: 'openai_proxy',
+        konklusjon: 'Godkjenn 14 dagers manuell pilot i kommunen.',
+        styrker: ['Forankret hos kommunesjef', 'HITL er sikret'],
+        gap: ['Ingen tekniske gap identifisert'],
+        testoppsett: ['Test 10 søknader', 'Mål avvik', 'Stopp hvis feilrate øker']
+      }),
+      text: async () => ''
+    };
+  };
+
+  const res = await evaluerSensor({
+    input,
+    proxyUrl: 'https://prosjektoggevinst-proxy.test.workers.dev',
+    httpPoster: mockPoster
+  });
+
+  assert.equal(kaltUrl, 'https://prosjektoggevinst-proxy.test.workers.dev');
+  assert.equal(res.kilde, 'openai_proxy');
+  assert.ok(res.konklusjon.includes('Godkjenn 14 dagers manuell pilot'));
+  assert.equal(res.styrker.length, 2);
+  assert.equal(res.gap.length, 1);
+  assert.equal(res.testoppsett.length, 3);
+});
+
+// 10. Test Student-Proxy: Feilhåndtering og fallback ved rate limit eller proxy-feil
+test('Student-Proxy: Fallback ved feil eller rate limit', async () => {
+  const input = {
+    dagensSituasjon: '40 timer manuell saksbehandling ukentlig.',
+    foreslaattLosning: 'Språkmodell for automatisering.',
+    eierSektorEffekt: 'IT-avdelingen tester verktøyet.',
+    svar: { eier: 'nei', baseline: 'nei', ikkeKi: 'nei', data: 'vet_ikke', kontroll: 'vet_ikke', juss: 'vet_ikke', test: 'vet_ikke' }
+  };
+
+  const mockFeilPoster = async () => ({
+    ok: false,
+    status: 429,
+    json: async () => ({ error: 'Rate limit overskredet' }),
+    text: async () => 'Rate limit overskredet'
+  });
+
+  const res = await evaluerSensor({
+    input,
+    proxyUrl: 'https://prosjektoggevinst-proxy.test.workers.dev',
+    httpPoster: mockFeilPoster
+  });
+
+  assert.equal(res.kilde, 'lokal');
+  assert.ok(res.fallbackGrunn && res.fallbackGrunn.includes('Kapasitetsgrense nådd på student-proxy'));
+  assert.ok(res.konklusjon.includes('Stopp videre utvikling'));
+});
+
+

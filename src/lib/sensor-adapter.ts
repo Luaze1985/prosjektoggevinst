@@ -159,18 +159,18 @@ export function lokalSensorFallback(input: SensorInput, fallbackGrunn?: string):
 
 /**
  * Hovedadapter for sensor-evaluering.
- * Aksepterer valgfri mock HttpClient for testbarhet (codebase-design).
+ * Støtter:
+ * 1. Direkte OpenAI API-kall (når apiKey er oppgitt)
+ * 2. Sikker Serverless Student-Proxy (når proxyUrl er oppgitt)
+ * 3. Robust deterministisk lokal fallback (når offline, ingen nøkkel, eller feil)
  */
 export async function evaluerSensor(params: {
   input: SensorInput;
   apiKey?: string;
+  proxyUrl?: string;
   httpPoster?: HttpPoster;
 }): Promise<SensorResultat> {
-  const { input, apiKey, httpPoster } = params;
-
-  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
-    return lokalSensorFallback(input, 'Ingen OpenAI API-nøkkel konfigurert.');
-  }
+  const { input, apiKey, proxyUrl, httpPoster } = params;
 
   const poster: HttpPoster = httpPoster || (async (url, opts) => {
     const res = await fetch(url, opts);
@@ -182,64 +182,108 @@ export async function evaluerSensor(params: {
     };
   });
 
-  try {
-    const brukerJson = byggBrukerMelding(input);
-    const res = await poster('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey.trim()}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        temperature: 0.1,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'sensor_evaluering',
-            strict: true,
-            schema: SENSOR_JSON_SCHEMA
-          }
+  // Spor 1: Direkte OpenAI API-kall
+  if (apiKey && typeof apiKey === 'string' && apiKey.trim().length > 0) {
+    try {
+      const brukerJson = byggBrukerMelding(input);
+      const res = await poster('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json'
         },
-        messages: [
-          { role: 'system', content: SENSOR_SYSTEM_PROMPT },
-          { role: 'user', content: brukerJson }
-        ]
-      })
-    });
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.1,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'sensor_evaluering',
+              strict: true,
+              schema: SENSOR_JSON_SCHEMA
+            }
+          },
+          messages: [
+            { role: 'system', content: SENSOR_SYSTEM_PROMPT },
+            { role: 'user', content: brukerJson }
+          ]
+        })
+      });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      const feilmelding = res.status === 401
-        ? 'Ugyldig API-nøkkel (401)'
-        : res.status === 429
-        ? 'Kapasitetsbegrensning hos OpenAI (429 Rate Limit)'
-        : `OpenAI feil (${res.status}): ${errText}`;
-      return lokalSensorFallback(input, feilmelding);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        const feilmelding = res.status === 401
+          ? 'Ugyldig API-nøkkel (401)'
+          : res.status === 429
+          ? 'Kapasitetsbegrensning hos OpenAI (429 Rate Limit)'
+          : `OpenAI feil (${res.status}): ${errText}`;
+        return lokalSensorFallback(input, feilmelding);
+      }
+
+      const json = await res.json();
+      const content = json?.choices?.[0]?.message?.content;
+      const parsed = rensOgParseJson(content);
+
+      if (!parsed.konklusjon || !Array.isArray(parsed.styrker) || !Array.isArray(parsed.gap) || !Array.isArray(parsed.testoppsett)) {
+        return lokalSensorFallback(input, 'Ufullstendig datastruktur fra OpenAI.');
+      }
+
+      const domene = finnDomene(`${input.dagensSituasjon} ${input.foreslaattLosning} ${input.eierSektorEffekt}`);
+
+      return {
+        kilde: 'openai',
+        domene: domene.navn,
+        konklusjon: parsed.konklusjon,
+        styrker: parsed.styrker,
+        gap: parsed.gap,
+        testoppsett: parsed.testoppsett
+      };
+    } catch (err: any) {
+      return lokalSensorFallback(input, `Nettverks- eller parsefeil: ${err.message}`);
     }
-
-    const json = await res.json();
-    const content = json?.choices?.[0]?.message?.content;
-    const parsed = rensOgParseJson(content);
-
-    // Valider felter
-    if (!parsed.konklusjon || !Array.isArray(parsed.styrker) || !Array.isArray(parsed.gap) || !Array.isArray(parsed.testoppsett)) {
-      return lokalSensorFallback(input, 'Ufullstendig datastruktur fra OpenAI.');
-    }
-
-    const domene = finnDomene(`${input.dagensSituasjon} ${input.foreslaattLosning} ${input.eierSektorEffekt}`);
-
-    return {
-      kilde: 'openai',
-      domene: domene.navn,
-      konklusjon: parsed.konklusjon,
-      styrker: parsed.styrker,
-      gap: parsed.gap,
-      testoppsett: parsed.testoppsett
-    };
-  } catch (err: any) {
-    return lokalSensorFallback(input, `Nettverks- eller parsefeil: ${err.message}`);
   }
+
+  // Spor 2: Sikker Student-Proxy (Cloudflare Worker)
+  if (proxyUrl && typeof proxyUrl === 'string' && proxyUrl.trim().length > 0) {
+    try {
+      const res = await poster(proxyUrl.trim(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(input)
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        const feilmelding = res.status === 429
+          ? 'Kapasitetsgrense nådd på student-proxy (maks 20 per 10 min).'
+          : `Proxyfeil (${res.status}): ${errText}`;
+        return lokalSensorFallback(input, feilmelding);
+      }
+
+      const parsed = await res.json();
+      if (!parsed.konklusjon || !Array.isArray(parsed.styrker) || !Array.isArray(parsed.gap) || !Array.isArray(parsed.testoppsett)) {
+        return lokalSensorFallback(input, 'Ufullstendig datastruktur fra student-proxy.');
+      }
+
+      const domene = finnDomene(`${input.dagensSituasjon} ${input.foreslaattLosning} ${input.eierSektorEffekt}`);
+
+      return {
+        kilde: 'openai_proxy',
+        domene: domene.navn,
+        konklusjon: parsed.konklusjon,
+        styrker: parsed.styrker,
+        gap: parsed.gap,
+        testoppsett: parsed.testoppsett
+      };
+    } catch (err: any) {
+      return lokalSensorFallback(input, `Tilkoblingsfeil mot student-proxy: ${err.message}`);
+    }
+  }
+
+  // Spor 3: Lokal deterministisk fallback (ingen nøkkel eller proxy konfigurert)
+  return lokalSensorFallback(input, 'Ingen OpenAI API-nøkkel eller student-proxy konfigurert.');
 }
 
 /**
