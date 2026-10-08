@@ -51,7 +51,8 @@ const {
   byggBrukerMelding,
   lokalSensorFallback,
   evaluerSensor,
-  lagKiPrompt
+  lagKiPrompt,
+  opprettInnlimtResultat
 } = sensorAdapter;
 
 // 1. Test Prompt-bygger og systeminstruks
@@ -304,3 +305,26 @@ test('Handoff-prompt: Genererer eksekverbar Markdown-rigg med 3 artefakter', () 
   assert.ok(prompt.includes('ARTEFAKT 3: 150-ords beslutningsnotat'));
   assert.ok(prompt.includes('Stoppregel ved økt feilrate'));
 });
+
+// 8. Test parsing av bruker-innlimt KI-vurdering fra ChatGPT / Claude
+test('Bruker-innlimt resultat: parser råtekst til strukturert SensorResultat', () => {
+  const raatekst = `Piloten bør godkjennes under forutsetning av at prosesseier signerer mandatet.
+• Sterk forankring og målt baseline i drift
+• Bruk av eksisterende data reduserer risiko
+• Gap: Personvernvurdering mangler formell godkjenning
+• Gap: Rutiner for manuell overprøving må dokumenteres
+• Test på 5 henvendelser første uke
+• Sammenlign tidsbruk mot baseline
+• Stopp hvis feilrate overskrider 3 %`;
+
+  const res = opprettInnlimtResultat(raatekst);
+  assert.equal(res.kilde, 'bruker_innlimt');
+  assert.ok(res.konklusjon.includes('Piloten bør godkjennes'));
+  assert.equal(res.styrker.length, 2);
+  assert.ok(res.styrker[0].includes('Sterk forankring'));
+  assert.equal(res.gap.length, 2);
+  assert.ok(res.gap[0].includes('Personvernvurdering'));
+  assert.equal(res.testoppsett.length, 3);
+  assert.equal(res.raatekst, raatekst);
+});
+

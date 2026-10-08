@@ -79,11 +79,12 @@ export interface SensorInput {
 }
 
 export interface SensorResultat {
-  kilde: 'openai' | 'lokal';
+  kilde: 'openai' | 'lokal' | 'bruker_innlimt';
   konklusjon: string;
   styrker: string[];
   gap: string[];
   testoppsett: string[];
+  raatekst?: string;
   domene?: string;
   fallbackGrunn?: string;
 }

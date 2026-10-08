@@ -243,6 +243,32 @@ export async function evaluerSensor(params: {
 }
 
 /**
+ * Konverterer råtekst innlimt fra ChatGPT / Claude til et strukturert SensorResultat
+ */
+export function opprettInnlimtResultat(tekst: string): SensorResultat {
+  const renset = tekst.trim();
+  const linjer = renset.split('\n').map((l) => l.trim()).filter(Boolean);
+  const forsteLinje = linjer[0] || 'Vurdering importert fra ChatGPT/Claude.';
+
+  const kulepunkter = linjer
+    .filter((l) => l.startsWith('-') || l.startsWith('•') || l.startsWith('*'))
+    .map((l) => l.replace(/^[-•*]\s*/, '').trim());
+
+  return {
+    kilde: 'bruker_innlimt',
+    konklusjon: forsteLinje.length > 200 ? forsteLinje.slice(0, 197) + '...' : forsteLinje,
+    styrker: kulepunkter.slice(0, 2).length > 0 ? kulepunkter.slice(0, 2) : ['Strukturert vurdering utført via ekstern KI-modell.'],
+    gap: kulepunkter.slice(2, 4).length > 0 ? kulepunkter.slice(2, 4) : ['Se utfyllende vurderingstekst nedenfor.'],
+    testoppsett: kulepunkter.slice(4, 7).length > 0 ? kulepunkter.slice(4, 7) : [
+      'Gjennomfør 1-ukes manuell test på 5 saker',
+      'Mål avvik mot baseline',
+      'Avbryt hvis tidsbruk eller feilrate øker'
+    ],
+    raatekst: renset
+  };
+}
+
+/**
  * Genererer en Markdown-rigget Handoff-prompt klar for ChatGPT/Claude
  */
 export function lagKiPrompt(pakke: HandoffPakke): string {

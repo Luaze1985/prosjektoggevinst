@@ -22,7 +22,9 @@ import {
   TrendingUp,
   Clock,
   Sparkles,
-  Printer
+  Printer,
+  ExternalLink,
+  Send
 } from 'lucide-react';
 import {
   PortvaktId,
@@ -34,7 +36,7 @@ import {
   HandoffPakke
 } from './lib/types';
 import { finnDomene, tellTreff, rangerCaser } from './lib/case-search';
-import { evaluerSensor, lokalSensorFallback, lagKiPrompt } from './lib/sensor-adapter';
+import { evaluerSensor, lokalSensorFallback, lagKiPrompt, opprettInnlimtResultat } from './lib/sensor-adapter';
 import {
   EMPIRISKE_REFERANSER,
   beregnDfoGevinst,
@@ -196,39 +198,42 @@ export default function App() {
   const matchedeCaser = rangerCaser(samletInputTekst, caser, 3);
   const antallTreffIDb = tellTreff(samletInputTekst, caser);
 
-  // Kjøring av sensor til Steg 4 (med caching)
-  const gaaTilSensor = async () => {
-    const gjeldendeNokkel = JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: apiKey.trim() });
-    if (gjeldendeNokkel !== sisteKjorteNokkel || !sensor) {
-      setLasterSensor(true);
-      setSteg(4);
-      try {
-        const res = await evaluerSensor({
-          input: {
-            dagensSituasjon,
-            foreslaattLosning,
-            eierSektorEffekt,
-            svar,
-            caser: matchedeCaser
-          },
-          apiKey: apiKey.trim()
-        });
-        setSensor(res);
-        setSisteKjorteNokkel(gjeldendeNokkel);
-      } catch {
-        const fallback = lokalSensorFallback({
+  // Kjøring av sensor til Steg 4
+  const kjoerDirekteSensor = async (nokkelTilBruk?: string) => {
+    const aktivNokkel = (nokkelTilBruk !== undefined ? nokkelTilBruk : apiKey).trim();
+    setLasterSensor(true);
+    try {
+      const res = await evaluerSensor({
+        input: {
           dagensSituasjon,
           foreslaattLosning,
           eierSektorEffekt,
           svar,
           caser: matchedeCaser
-        });
-        setSensor(fallback);
-      } finally {
-        setLasterSensor(false);
-      }
-    } else {
-      setSteg(4);
+        },
+        apiKey: aktivNokkel
+      });
+      setSensor(res);
+      setSisteKjorteNokkel(JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: aktivNokkel }));
+    } catch {
+      const fallback = lokalSensorFallback({
+        dagensSituasjon,
+        foreslaattLosning,
+        eierSektorEffekt,
+        svar,
+        caser: matchedeCaser
+      });
+      setSensor(fallback);
+    } finally {
+      setLasterSensor(false);
+    }
+  };
+
+  const gaaTilSensor = async () => {
+    setSteg(4);
+    const gjeldendeNokkel = JSON.stringify({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, apiKey: apiKey.trim() });
+    if (gjeldendeNokkel !== sisteKjorteNokkel || !sensor) {
+      await kjoerDirekteSensor();
     }
   };
 
@@ -249,7 +254,7 @@ export default function App() {
     }
   ];
 
-  // Eksportfunksjoner
+  // Eksportfunksjoner og Handoff
   const handoffPakke: HandoffPakke = {
     input: { dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, caser: matchedeCaser },
     svar,
@@ -274,8 +279,49 @@ export default function App() {
     }
   };
 
+  // Innlimt KI-vurdering og ekstern dialog
+  const [innlimtTekst, setInnlimtTekst] = useState('');
+  const [visInnlimingsBoks, setVisInnlimingsBoks] = useState(false);
+  const [innlimtSuksess, setInnlimtSuksess] = useState(false);
+  const [eksternStatusMelding, setEksternStatusMelding] = useState<string | null>(null);
+
+  const aapneIChatGpt = () => {
+    const prompt = lagKiPrompt(handoffPakke);
+    kopierTilUtklipp(prompt, 'chatgpt');
+    const url = prompt.length < 2000
+      ? `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`
+      : 'https://chatgpt.com/';
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setVisInnlimingsBoks(true);
+    setEksternStatusMelding('Prompt kopiert til utklipp! ChatGPT er åpnet. Lim inn svaret under når ferdig.');
+    setTimeout(() => setEksternStatusMelding(null), 6000);
+  };
+
+  const aapneIClaude = () => {
+    const prompt = lagKiPrompt(handoffPakke);
+    kopierTilUtklipp(prompt, 'claude');
+    window.open('https://claude.ai/new', '_blank', 'noopener,noreferrer');
+    setVisInnlimingsBoks(true);
+    setEksternStatusMelding('Prompt kopiert til utklipp! Claude er åpnet. Lim inn svaret under når ferdig.');
+    setTimeout(() => setEksternStatusMelding(null), 6000);
+  };
+
+  const brukInnlimtTekst = () => {
+    if (!innlimtTekst.trim()) return;
+    const res = opprettInnlimtResultat(innlimtTekst);
+    setSensor(res);
+    setInnlimtSuksess(true);
+    setTimeout(() => setInnlimtSuksess(false), 3000);
+  };
+
   const kopierLedelsesnotat = () => {
     const dato = new Intl.DateTimeFormat('nb-NO', { dateStyle: 'long' }).format(new Date());
+    const kildeNavn = sensor?.kilde === 'openai'
+      ? 'OpenAI gpt-4o-mini (direkte)'
+      : sensor?.kilde === 'bruker_innlimt'
+      ? 'ChatGPT / Claude (bruker-innlimt)'
+      : 'Lokal regelmotor';
+
     const notat = `BESLUTNINGSNOTAT: INNOVASJONS- OG KI-PILOT
 Dato: ${dato}
 Status: ${domTittel} (${antallJa} av 7 avklart) | Modenhet: ${studentEvaluering.modenhetNavn} (${studentEvaluering.totalscore}/100 poeng)
@@ -293,13 +339,13 @@ ${foreslaattLosning}
 - Est. årlig verdi: ${dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr/år (${dfoGevinst.gevinstkategori})
 Forankring: ${eierSektorEffekt}
 
-4. SENSORENS VURDERING (${sensor?.kilde === 'openai' ? 'OpenAI gpt-4o-mini' : 'Lokal regelmotor'})
+4. SENSORENS VURDERING (${kildeNavn})
 Konklusjon: ${sensor?.konklusjon || 'Avventer'}
 Styrker:
 ${(sensor?.styrker || []).map((s) => `• ${s}`).join('\n')}
 Kritiske gap som må lukkes:
 ${(sensor?.gap || []).map((g) => `• ${g}`).join('\n')}
-
+${sensor?.raatekst ? `\nUtfyllende KI-vurdering fra samtalen:\n${sensor.raatekst}\n` : ''}
 5. PLAN FOR KOMMENDE UKE
 ${ukeoppgaver.map((u, i) => `${i + 1}. ${u.tittel}: ${u.tekst}`).join('\n')}
 
@@ -336,6 +382,9 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
     setSvar(STANDARD_SVAR);
     setSensor(null);
     setSisteKjorteNokkel('');
+    setInnlimtTekst('');
+    setVisInnlimingsBoks(false);
+    setEksternStatusMelding(null);
     setSteg(1);
   };
 
@@ -849,9 +898,216 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
           </section>
         )}
 
-        {/* STEG 4: KI-SENSOR */}
+        {/* STEG 4: KI-SENSOR & EVALUERINGSARENA */}
         {steg === 4 && (
           <section className="space-y-6">
+            {/* 1. DETERMINISTISK FAKTAGRUNNLAG SOM FØLGER ROLIG OG ORDENTLIG MED */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                      Deterministisk Faktagrunnlag (Ufravikelig Fasit)
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Disse faktaene danner grunnmuren og kan aldri overprøves av språkmodellen.
+                    </p>
+                  </div>
+                </div>
+                <span className="self-start sm:self-auto text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                  {studentEvaluering.modenhetNavn} ({studentEvaluering.totalscore}/100 p)
+                </span>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
+                  <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-slate-400" /> Målt Baseline
+                  </span>
+                  <p className="mt-1 font-bold text-slate-900 text-sm">{timerPerUke} timer / uke</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">{timerPerUke * 46} t/år i dagens prosess</p>
+                </div>
+
+                <div className="rounded-lg bg-emerald-50/60 p-3 border border-emerald-100">
+                  <span className="text-[11px] font-medium text-emerald-800 flex items-center gap-1">
+                    <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> DFØ Kapasitetsgevinst
+                  </span>
+                  <p className="mt-1 font-bold text-emerald-900 text-sm">{dfoGevinst.timerFrigjortPerUke} t/uke frigjort</p>
+                  <p className="text-[11px] text-emerald-700 mt-0.5">{dfoGevinst.aarsverkFrigjort} årsverk ({kuttProsent}% kutt)</p>
+                </div>
+
+                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
+                  <span className="text-[11px] font-medium text-slate-500">Est. Årlig Verdi</span>
+                  <p className="mt-1 font-bold text-slate-900 text-sm">{dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr/år</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">{dfoGevinst.gevinstkategori}</p>
+                </div>
+
+                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
+                  <span className="text-[11px] font-medium text-slate-500">Portvakt-status</span>
+                  <p className="mt-1 font-bold text-slate-900 text-sm">{antallJa} av 7 avklart ({domTittel})</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Eier: {svar.eier} • Baseline: {svar.baseline}</p>
+                </div>
+              </div>
+
+              {/* Rask sammendrag av caset */}
+              <div className="rounded-lg bg-slate-50 p-3 border border-slate-100 text-xs space-y-1.5 text-slate-700">
+                <p><strong className="text-slate-900">Dagens situasjon:</strong> {dagensSituasjon}</p>
+                <p><strong className="text-slate-900">Foreslått løsning:</strong> {foreslaattLosning}</p>
+                <p><strong className="text-slate-900">Forankring & effekt:</strong> {eierSektorEffekt}</p>
+              </div>
+            </div>
+
+            {/* 2. HANDLINGSARENA FOR KI-VURDERING */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-blue-600" />
+                    Generer eller oppdater KI-vurdering
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Språkmodellen stresstester caset med de deterministiske faktaene som fast ramme.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* SPOR 1: DIREKTE I NETTLESEREN MED OPENAI */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <Key className="h-3.5 w-3.5 text-blue-600" /> Spor 1: Direkte med OpenAI API
+                      </span>
+                      {apiKey.trim() && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
+                          Nøkkel aktiv
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      Kjører mot <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">gpt-4o-mini</code> rett i din nettleser (lagres lokalt i localStorage).
+                    </p>
+                    {!apiKey.trim() && (
+                      <div className="pt-1">
+                        <input
+                          type="password"
+                          placeholder="Lim inn OpenAI API-nøkkel (sk-proj-...)"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={lasterSensor}
+                    onClick={() => {
+                      if (!apiKey.trim() && apiKeyInput.trim()) {
+                        lagreApiKey(apiKeyInput);
+                      }
+                      kjoerDirekteSensor(apiKey.trim() || apiKeyInput.trim());
+                    }}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {lasterSensor ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyserer med OpenAI…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3.5 w-3.5" /> Kjør OpenAI-vurdering
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* SPOR 2: BRUK CHATGPT ELLER CLAUDE (0 KR) */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <ExternalLink className="h-3.5 w-3.5 text-blue-600" /> Spor 2: Bruk ChatGPT eller Claude (0 kr)
+                    </span>
+                    <p className="text-xs text-slate-600">
+                      Kopierer full faktarigg og åpner ChatGPT eller Claude i ny fane. Lim svaret inn under.
+                    </p>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={aapneIChatGpt}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <ExternalLink className="h-3 w-3 text-slate-500" /> Åpne i ChatGPT ↗
+                      </button>
+                      <button
+                        type="button"
+                        onClick={aapneIClaude}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <ExternalLink className="h-3 w-3 text-slate-500" /> Åpne i Claude ↗
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setVisInnlimingsBoks(!visInnlimingsBoks)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50/80 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    <Clipboard className="h-3.5 w-3.5" />
+                    {visInnlimingsBoks ? 'Skjul innlimingsfelt' : 'Lim inn vurdering fra ChatGPT/Claude'}
+                  </button>
+                </div>
+              </div>
+
+              {eksternStatusMelding && (
+                <div className="rounded-lg bg-emerald-50 p-2.5 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-1.5 font-medium">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" /> {eksternStatusMelding}
+                </div>
+              )}
+
+              {/* INNLIMINGSBOKS */}
+              {visInnlimingsBoks && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <label className="text-xs font-bold text-slate-900">
+                      Lim inn teksten fra ChatGPT eller Claude her:
+                    </label>
+                    <span className="text-[11px] text-slate-500">
+                      Appen trekker ut konklusjon, styrker, gap og testoppsett automatisk.
+                    </span>
+                  </div>
+                  <textarea
+                    value={innlimtTekst}
+                    onChange={(e) => setInnlimtTekst(e.target.value)}
+                    rows={6}
+                    placeholder="Lim inn svaret fra ChatGPT eller Claude her..."
+                    className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans"
+                  />
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      disabled={!innlimtTekst.trim()}
+                      onClick={brukInnlimtTekst}
+                      className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      Bruk denne KI-vurderingen i caset
+                    </button>
+                    {innlimtSuksess && (
+                      <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                        <Check className="h-4 w-4" /> KI-vurdering oppdatert!
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. SENSORENS VURDERING (RESULTATKORT) */}
             {lasterSensor ? (
               <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm space-y-3">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
@@ -860,19 +1116,23 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               </div>
             ) : sensor ? (
               <div className="space-y-6">
-                {/* 1-setnings konklusjon */}
-                <div className="rounded-xl border-2 border-blue-500 bg-blue-50/70 p-5 shadow-sm">
+                {/* 1-setnings konklusjon med opprinnelsesmerke */}
+                <div className="rounded-xl border-2 border-blue-500 bg-blue-50/70 p-5 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-blue-800">
                     <span>Sensorens Hovedkonklusjon</span>
-                    <span className="font-semibold text-slate-600 lowercase bg-white/80 px-2 py-0.5 rounded border border-blue-200">
-                      {sensor.kilde === 'openai' ? 'OpenAI gpt-4o-mini' : 'Lokal regelmotor (0 kr)'}
+                    <span className="font-semibold text-slate-600 lowercase bg-white/90 px-2.5 py-0.5 rounded border border-blue-200">
+                      {sensor.kilde === 'openai'
+                        ? 'OpenAI gpt-4o-mini (direkte)'
+                        : sensor.kilde === 'bruker_innlimt'
+                        ? 'ChatGPT / Claude (bruker-innlimt)'
+                        : 'Lokal regelmotor (0 kr)'}
                     </span>
                   </div>
-                  <p className="mt-2 text-base font-semibold leading-relaxed text-slate-950">
+                  <p className="text-base font-semibold leading-relaxed text-slate-950">
                     «{sensor.konklusjon}»
                   </p>
                   {sensor.fallbackGrunn && (
-                    <p className="mt-1 text-xs text-amber-800 font-normal">
+                    <p className="text-xs text-amber-800 font-normal">
                       Merk: {sensor.fallbackGrunn}
                     </p>
                   )}
@@ -913,6 +1173,21 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     </ul>
                   </div>
                 </div>
+
+                {/* Fullstendig innlimt vurderingstekst hvis tilgjengelig */}
+                {sensor.raatekst && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                        Fullstendig KI-vurdering fra samtalen
+                      </h4>
+                      <span className="text-[11px] text-slate-500">Inkluderes i Handoff og Ledelsesnotat</span>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-4 text-xs font-sans text-slate-800 leading-relaxed whitespace-pre-wrap border border-slate-200 max-h-96 overflow-y-auto">
+                      {sensor.raatekst}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
 
