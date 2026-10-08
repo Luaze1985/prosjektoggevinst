@@ -168,19 +168,27 @@ test('Student Case Evaluering: scoring og modenhetstrinn (ekte engine.ts)', () =
 
 // 4. Test Datagrunnlag og filstørrelser (< 100 MB, intakt)
 test('Datagrunnlag i public/data og supabase/data', () => {
-  const filesToCheck = [
+  // cases_seed.csv er tracket i git og er obligatorisk
+  const seedPath = path.join(appRoot, 'supabase/data/cases_seed.csv');
+  assert.ok(fs.existsSync(seedPath), `Filen ${seedPath} må eksistere.`);
+  const seedStats = fs.statSync(seedPath);
+  const seedMb = seedStats.size / (1024 * 1024);
+  assert.ok(seedMb > 0, 'cases_seed.csv kan ikke være tom.');
+  assert.ok(seedMb < 100, 'cases_seed.csv overskrider 100 MB.');
+
+  // Sjekk lokale rådatafiler dersom de er til stede (ekskludert fra git pga. 90 MB størrelse)
+  const optionalLocalFiles = [
     { p: path.join(appRoot, 'public/data/cases.csv'), maxMb: 100 },
     { p: path.join(appRoot, 'public/data/cases.jsonl'), maxMb: 100 },
     { p: path.join(appRoot, 'public/data/evidenskart.csv'), maxMb: 100 },
-    { p: path.join(appRoot, 'supabase/data/cases_seed.csv'), maxMb: 100 },
   ];
-
-  for (const f of filesToCheck) {
-    assert.ok(fs.existsSync(f.p), `Filen ${f.p} må eksistere.`);
-    const stats = fs.statSync(f.p);
-    const sizeMb = stats.size / (1024 * 1024);
-    assert.ok(sizeMb > 0, `Filen ${f.p} kan ikke være tom.`);
-    assert.ok(sizeMb < f.maxMb, `Filen ${f.p} er ${sizeMb.toFixed(2)} MB, som overskrider grensen på ${f.maxMb} MB.`);
+  for (const f of optionalLocalFiles) {
+    if (fs.existsSync(f.p)) {
+      const stats = fs.statSync(f.p);
+      const sizeMb = stats.size / (1024 * 1024);
+      assert.ok(sizeMb > 0, `Filen ${f.p} kan ikke være tom.`);
+      assert.ok(sizeMb < f.maxMb, `Filen ${f.p} er ${sizeMb.toFixed(2)} MB, som overskrider grensen på ${f.maxMb} MB.`);
+    }
   }
 
   // Sjekk antall linjer og nøyaktig 18 kolonner i cases_seed.csv
