@@ -123,11 +123,14 @@ export default function App() {
   const [lagretNokkelMelding, setLagretNokkelMelding] = useState(false);
 
   // Student-proxy URL (for zero-friction bruk i klasserommet)
+  const STANDARD_PROXY_URL = 'https://white-tooth-b839.larserik-bn.workers.dev';
   const [proxyUrl, setProxyUrl] = useState<string>(() => {
     try {
-      return localStorage.getItem('student_proxy_url') || (import.meta as any).env?.VITE_STUDENT_PROXY_URL || '';
+      const lagret = localStorage.getItem('student_proxy_url');
+      if (lagret !== null) return lagret;
+      return (import.meta as any).env?.VITE_STUDENT_PROXY_URL || STANDARD_PROXY_URL;
     } catch {
-      return '';
+      return STANDARD_PROXY_URL;
     }
   });
   const [proxyUrlInput, setProxyUrlInput] = useState(proxyUrl);
