@@ -86,6 +86,8 @@ export interface SensorInput {
 
 export interface SensorResultat {
   versjon?: number;
+  steg?: number;
+  revisordom?: string;
   begrunnelse?: string;
   evidens?: (ReferanseCase & { resultat?: string; relevans: string; begrensning: string })[];
   datagrunnlag?: { kilde: 'supabase' | 'lokal_casebank'; antallCaser?: number; antallTreff: number; merknad?: string };

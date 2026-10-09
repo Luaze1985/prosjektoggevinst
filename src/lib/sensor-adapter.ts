@@ -110,6 +110,8 @@ export function lokalSensorFallback(input: SensorInput, fallbackGrunn?: string):
   return {
     kilde: 'lokal',
     domene: domene.navn,
+    steg: 2,
+    revisordom: decisionFrame(input).status,
     konklusjon,
     styrker,
     gap,
@@ -235,7 +237,14 @@ export async function evaluerSensor(params: {
         styrker: parsed.styrker,
         gap: parsed.gap,
         testoppsett: parsed.testoppsett,
-        ...(parsed.versjon === 2 ? { versjon: 2, begrunnelse: parsed.begrunnelse, evidens: parsed.evidens, datagrunnlag: parsed.datagrunnlag } :
+        ...(parsed.versjon === 2 ? {
+          versjon: 2,
+          steg: parsed.steg || 2,
+          revisordom: parsed.revisordom,
+          begrunnelse: parsed.begrunnelse,
+          evidens: parsed.evidens,
+          datagrunnlag: parsed.datagrunnlag
+        } :
           { fallbackGrunn: 'Tjenesten bruker en eldre vurdering uten kontrollert kildegrunnlag.' })
       };
     } catch (err: any) {

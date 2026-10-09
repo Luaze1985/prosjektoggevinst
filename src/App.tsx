@@ -1066,15 +1066,22 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                 <div className="rounded-xl border-2 border-blue-500 bg-blue-50/70 p-5 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-blue-800">
                     <span>Vurdering</span>
-                    <span className="font-semibold text-slate-600 lowercase bg-white/90 px-2.5 py-0.5 rounded border border-blue-200">
-                      {sensor.kilde === 'openai'
-                        ? 'OpenAI gpt-4o-mini (direkte)'
-                        : sensor.kilde === 'openai_proxy'
-                        ? 'OpenAI gpt-4o-mini (via student-proxy)'
-                        : sensor.kilde === 'bruker_innlimt'
-                        ? 'ChatGPT / Claude (bruker-innlimt)'
-                        : 'Lokal regelmotor (0 kr)'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {sensor.steg === 2 && (
+                        <span className="font-semibold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-300 text-[11px] normal-case">
+                          2-stegs revisjon (revisor ➔ arkitekt)
+                        </span>
+                      )}
+                      <span className="font-semibold text-slate-600 lowercase bg-white/90 px-2.5 py-0.5 rounded border border-blue-200">
+                        {sensor.kilde === 'openai'
+                          ? 'OpenAI gpt-4o-mini (direkte)'
+                          : sensor.kilde === 'openai_proxy'
+                          ? 'OpenAI gpt-4o-mini (via student-proxy)'
+                          : sensor.kilde === 'bruker_innlimt'
+                          ? 'ChatGPT / Claude (bruker-innlimt)'
+                          : 'Lokal regelmotor (0 kr)'}
+                      </span>
+                    </div>
                   </div>
                   <p className="text-base font-semibold leading-relaxed text-slate-950">
                     «{sensor.konklusjon}»
