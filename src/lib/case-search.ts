@@ -106,7 +106,7 @@ export function tellTreff(tekst: string, caser: ReferanseCase[]): number {
   if (domene.id === 'generell') return 0;
 
   return caser.filter((c) => {
-    const samlet = `${c.organisasjon || ''} ${c.tittel || ''} ${c.oppnaaddResultat || ''}`.toLowerCase();
+    const samlet = `${c.organisasjon || ''} ${c.tittel || ''} ${c.bransje || ''} ${c.oppnaaddResultat || ''}`.toLowerCase();
     return domene.ord.test(samlet);
   }).length;
 }
@@ -131,7 +131,7 @@ export function rangerCaser(
   const domene = finnDomene(tekst);
 
   const scoreCase = (c: ReferanseCase): number => {
-    const innhold = `${c.organisasjon || ''} ${c.tittel || ''} ${c.oppnaaddResultat || ''}`.toLowerCase();
+    const innhold = `${c.organisasjon || ''} ${c.tittel || ''} ${c.bransje || ''} ${c.oppnaaddResultat || ''}`.toLowerCase();
     let score = domene.ord.test(innhold) ? 5 : 0;
     for (const ord of ordListe) {
       if (innhold.includes(ord)) score += 1;

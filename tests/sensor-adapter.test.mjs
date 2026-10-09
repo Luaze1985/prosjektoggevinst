@@ -28,6 +28,7 @@ function loadTsModule(relPath) {
     if (id === './case-search') {
       return loadTsModule('src/lib/case-search.ts');
     }
+    if (id === '../../proxy/evaluation-contract.js') return loadTsModule('proxy/evaluation-contract.js');
     return {};
   };
   
@@ -124,6 +125,7 @@ test('OpenAI Adapter: Vellykket evaluering via mock-klient', async () => {
   };
 
   const mockResponsData = {
+    evidens: [],
     konklusjon: 'Gjennomfør 14 dagers manuell pilot på 10 henvendelser.',
     styrker: ['Prosesseier og baseline er målt', 'Saksbehandler beholder full kontroll'],
     gap: ['Ingen tekniske integrasjoner er spesifisert'],
@@ -155,7 +157,8 @@ test('OpenAI Adapter: Vellykket evaluering via mock-klient', async () => {
   });
 
   assert.strictEqual(resultat.kilde, 'openai');
-  assert.strictEqual(resultat.konklusjon, mockResponsData.konklusjon);
+  assert.strictEqual(resultat.begrunnelse, mockResponsData.konklusjon);
+  assert.ok(resultat.konklusjon.includes('Avklar før utvikling'));
   assert.strictEqual(resultat.styrker.length, 2);
   assert.strictEqual(resultat.testoppsett.length, 3);
   assert.strictEqual(mottokHeaders.Authorization, 'Bearer sk-test-12345');
@@ -231,7 +234,7 @@ test('Lokal Fallback: Produserer komplett gyldig skjema med stoppregel', () => {
   };
 
   const resModen = lokalSensorFallback(modenInput);
-  assert.ok(resModen.konklusjon.includes('Gjennomfør en 14 dagers manuell pilot'));
+  assert.ok(resModen.konklusjon.includes('Stopp videre utvikling'));
   assert.ok(resModen.styrker.some(s => s.includes('Prosesseier')));
 });
 

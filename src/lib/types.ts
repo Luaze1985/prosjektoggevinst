@@ -35,6 +35,9 @@ export interface GevinstBeregning {
 }
 
 export interface ReferanseCase {
+  caseId?: string;
+  problem?: string;
+  mangler?: string;
   tittel: string;
   organisasjon: string;
   oppnaaddResultat: string;
@@ -42,6 +45,7 @@ export interface ReferanseCase {
   kilde?: string;
   kildeUrl?: string;
   maaltResultat?: string;        // Alias for bakoverkompatibilitet
+  bransje?: string;
 }
 
 export interface EvalueringResultat {
@@ -71,6 +75,8 @@ export type SvarVerdi = 'ja' | 'vet_ikke' | 'nei';
 export type Svar = Record<PortvaktId, SvarVerdi>;
 
 export interface SensorInput {
+  timerPerUke?: number;
+  kuttProsent?: number;
   dagensSituasjon: string;
   foreslaattLosning: string;
   eierSektorEffekt: string;
@@ -79,6 +85,10 @@ export interface SensorInput {
 }
 
 export interface SensorResultat {
+  versjon?: number;
+  begrunnelse?: string;
+  evidens?: (ReferanseCase & { resultat?: string; relevans: string; begrensning: string })[];
+  datagrunnlag?: { kilde: 'supabase' | 'lokal_casebank'; antallCaser?: number; antallTreff: number; merknad?: string };
   kilde: 'openai' | 'lokal' | 'bruker_innlimt' | 'openai_proxy';
   konklusjon: string;
   styrker: string[];

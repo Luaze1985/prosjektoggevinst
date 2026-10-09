@@ -19,44 +19,16 @@ export type HttpPoster = (
 
 export const FORBUDTE_ORD = ['spennende', 'innovativ', 'robust', 'revolusjonerende', 'synergier', 'optimalisere', 'potensial'];
 
-export const SENSOR_SYSTEM_PROMPT = `Rolle: Du er en nådeløs, jordnær innovasjonsrevisor for industri, næringsliv og offentlige etater. 
-Tone: Nøktern, direkte, handlingsorientert på norsk bokmål.
-Forbudte ord: ${FORBUDTE_ORD.map(w => `"${w}"`).join(', ')}.
+export { SYSTEM_PROMPT as SENSOR_SYSTEM_PROMPT, JSON_SCHEMA as SENSOR_JSON_SCHEMA } from '../../proxy/evaluation-contract.js';
+import { SYSTEM_PROMPT as SENSOR_SYSTEM_PROMPT, JSON_SCHEMA as SENSOR_JSON_SCHEMA, buildContext, validateAssessment, decisionFrame } from '../../proxy/evaluation-contract.js';
 
-Ufravikelige regler:
-1. Sjekklistesvarene (ja / vet_ikke / nei) er EVIDENSBASERT FASIT og kan aldri overprøves.
-2. Hvis prosesseier eller baseline mangler (nei/vet_ikke), er prosjektet automatisk BLOKKERT for videre koding.
-3. Ingen innledninger, ingen høflighetsfraser, ingen rådgiver-floskler.
-4. "testoppsett" MÅ inneholde en tallfestet stoppregel (f.eks. "Stopp hvis tidsbruk > dagens nivå, eller feilrate > 2 %").
-5. Alle genererte kulepunkter skal være på MAKS én setning.
-6. Svar KUN i gyldig JSON etter skjemaet.`;
-
-export const SENSOR_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['konklusjon', 'styrker', 'gap', 'testoppsett'],
-  properties: {
-    konklusjon: { type: 'string', maxLength: 220 },
-    styrker: {
-      type: 'array',
-      items: { type: 'string', maxLength: 160 },
-      minItems: 2,
-      maxItems: 3
-    },
-    gap: {
-      type: 'array',
-      items: { type: 'string', maxLength: 160 },
-      minItems: 2,
-      maxItems: 3
-    },
-    testoppsett: {
-      type: 'array',
-      items: { type: 'string', maxLength: 200 },
-      minItems: 3,
-      maxItems: 3
-    }
-  }
-};
+function references(input: SensorInput) {
+  return (input.caser || []).slice(0, 3).map((c, i) => ({
+    caseId: c.caseId || `lokal-${i + 1}`, tittel: c.tittel, organisasjon: c.organisasjon,
+    problem: c.problem || '', resultat: c.oppnaaddResultat, evidens: c.evidens,
+    kilde: c.kilde || '', kildeUrl: c.kildeUrl || '', mangler: c.mangler || 'Dokumentasjonsgap er ikke oppgitt.'
+  }));
+}
 
 /**
  * Defensiv JSON-parser som vasker vekk Markdown-fences og unødvendig whitespace
@@ -89,18 +61,7 @@ export function rensOgParseJson(raw: string): any {
  */
 export function byggBrukerMelding(input: SensorInput): string {
   const domene = finnDomene(`${input.dagensSituasjon} ${input.foreslaattLosning} ${input.eierSektorEffekt}`);
-  return JSON.stringify({
-    domene: domene.navn,
-    dagensSituasjon: input.dagensSituasjon,
-    foreslaattLosning: input.foreslaattLosning,
-    eierSektorEffekt: input.eierSektorEffekt,
-    svar: input.svar || {},
-    referanseCaser: (input.caser || []).slice(0, 3).map((c) => ({
-      tittel: c.tittel,
-      organisasjon: c.organisasjon,
-      resultat: c.oppnaaddResultat
-    }))
-  });
+  return JSON.stringify({ domene: domene.navn, ...buildContext(input, references(input)) });
 }
 
 /**
@@ -136,7 +97,7 @@ export function lokalSensorFallback(input: SensorInput, fallbackGrunn?: string):
   const styrker = jaSvar.slice(0, 3);
   const gap = gapSvar.slice(0, 3);
 
-  const konklusjon = (svar.eier === 'ja' && svar.baseline === 'ja')
+  const konklusjon = decisionFrame(input).status === 'manuell_test'
     ? `Gjennomfør en 14 dagers manuell pilot på ${domene.enheter}, men lukk de åpne gapene før koding starter.`
     : `Stopp videre utvikling inntil prosesseier og en målt baseline for ${domene.maaling} er på plass.`;
 
@@ -233,10 +194,8 @@ export async function evaluerSensor(params: {
       return {
         kilde: 'openai',
         domene: domene.navn,
-        konklusjon: parsed.konklusjon,
-        styrker: parsed.styrker,
-        gap: parsed.gap,
-        testoppsett: parsed.testoppsett
+        ...validateAssessment(parsed, input, references(input)),
+        versjon: 2
       };
     } catch (err: any) {
       return lokalSensorFallback(input, `Nettverks- eller parsefeil: ${err.message}`);
@@ -275,7 +234,9 @@ export async function evaluerSensor(params: {
         konklusjon: parsed.konklusjon,
         styrker: parsed.styrker,
         gap: parsed.gap,
-        testoppsett: parsed.testoppsett
+        testoppsett: parsed.testoppsett,
+        ...(parsed.versjon === 2 ? { versjon: 2, begrunnelse: parsed.begrunnelse, evidens: parsed.evidens, datagrunnlag: parsed.datagrunnlag } :
+          { fallbackGrunn: 'Tjenesten bruker en eldre vurdering uten kontrollert kildegrunnlag.' })
       };
     } catch (err: any) {
       return lokalSensorFallback(input, `Tilkoblingsfeil mot student-proxy: ${err.message}`);

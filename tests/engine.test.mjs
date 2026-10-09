@@ -247,3 +247,12 @@ test('kobleTilBackendLLM: trygg lokal fallback når server ikke er oppe', async 
   assert.ok(Array.isArray(res.mvpPlan) && res.mvpPlan.length > 0);
   assert.ok(res.referanseCaser && res.referanseCaser.length > 0);
 });
+
+// 7. Test Case-indeks integritet (3 168 caser tilgjengelig for frontend og proxy)
+test('Case-indeks i public/data/case-index.json inneholder nøyaktig 3 168 caser', () => {
+  const indexPath = path.join(appRoot, 'public/data/case-index.json');
+  assert.ok(fs.existsSync(indexPath), `Filen ${indexPath} må eksistere.`);
+  const cases = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+  assert.strictEqual(cases.length, 3168, `Forventet 3 168 caser, fant ${cases.length}`);
+  assert.ok(cases.every(c => c.caseId && c.tittel && c.organisasjon), 'Alle caser må ha caseId, tittel og organisasjon');
+});

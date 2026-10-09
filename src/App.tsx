@@ -35,7 +35,7 @@ import {
   ReferanseCase,
   HandoffPakke
 } from './lib/types';
-import { finnDomene, tellTreff, rangerCaser } from './lib/case-search';
+import { finnDomene, rangerCaser } from './lib/case-search';
 import { evaluerSensor, lokalSensorFallback, lagKiPrompt, opprettInnlimtResultat } from './lib/sensor-adapter';
 import {
   EMPIRISKE_REFERANSER,
@@ -62,13 +62,13 @@ interface PortvaktDef {
 }
 
 const PORTVAKTER: PortvaktDef[] = [
-  { id: 'eier', blokk: 1, kort: 'Prosesseier i linjen', sporsmal: 'Har dere en navngitt leder med linjeansvar som skal ta imot og realisere gevinsten?' },
-  { id: 'baseline', blokk: 1, kort: 'Nullalternativ (baseline målt)', sporsmal: 'Er dagens situasjon målt (tidsbruk, feilrate eller nedetid) slik at effekten kan bevises?' },
-  { id: 'ikkeKi', blokk: 2, kort: 'Ikke-KI vurdert først', sporsmal: 'Er enklere tiltak vurdert før KI, som standardmaler, faste regler, sjekklister eller endrede rutiner?' },
-  { id: 'data', blokk: 2, kort: 'Datatilgang og kvalitet', sporsmal: 'Finnes dataene løsningen trenger (bilder, sensordata, logger eller dokumenter) i god nok kvalitet?' },
-  { id: 'kontroll', blokk: 3, kort: 'Menneskelig kontroll (HITL)', sporsmal: 'Er det sikret at en fagperson kontrollerer og kan overprøve forslagene før de tas i bruk?' },
-  { id: 'juss', blokk: 3, kort: 'Juridisk og personvern', sporsmal: 'Er personvern (GDPR), opphavsrett, konfidensialitet og informasjonssikkerhet vurdert?' },
-  { id: 'test', blokk: 3, kort: 'Testbar hypotese (MVP 0)', sporsmal: 'Finnes det en enkel manuell test på 5–10 saker som kan bevise verdien før det skrives kode?' }
+  { id: 'eier', blokk: 1, kort: 'Prosesseier', sporsmal: 'Har prosjektet en navngitt leder med ansvar for gevinsten?' },
+  { id: 'baseline', blokk: 1, kort: 'Dagens nivå', sporsmal: 'Er tidsbruk, feilrate eller nedetid målt?' },
+  { id: 'ikkeKi', blokk: 2, kort: 'Enklere tiltak', sporsmal: 'Er enklere tiltak prøvd før KI?' },
+  { id: 'data', blokk: 2, kort: 'Data', sporsmal: 'Finnes dataene løsningen trenger, i god nok kvalitet?' },
+  { id: 'kontroll', blokk: 3, kort: 'Faglig kontroll', sporsmal: 'Kontrollerer en fagperson forslagene før bruk?' },
+  { id: 'juss', blokk: 3, kort: 'Personvern og juss', sporsmal: 'Er personvern, opphavsrett og informasjonssikkerhet vurdert?' },
+  { id: 'test', blokk: 3, kort: 'Manuell test', sporsmal: 'Kan dere teste 5–10 saker før dere bygger?' }
 ];
 
 const STANDARD_SVAR: Svar = {
@@ -82,9 +82,9 @@ const STANDARD_SVAR: Svar = {
 };
 
 const BLOKKER = [
-  { nr: 1, tittel: 'Behov og forankring' },
-  { nr: 2, tittel: 'Løsningsvalg og datagrunnlag' },
-  { nr: 3, tittel: 'Kontroll, juss og smidig test' }
+  { nr: 1, tittel: 'Behov' },
+  { nr: 2, tittel: 'Løsning' },
+  { nr: 3, tittel: 'Kontroll' }
 ];
 
 export default function App() {
@@ -175,29 +175,19 @@ export default function App() {
   useEffect(() => {
     const baseUrl = import.meta.env.BASE_URL || './';
     const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-    fetch(`${cleanBase}data/cases.jsonl`)
+    fetch(`${cleanBase}data/case-index.json`)
       .then((res) => {
-        if (!res.ok) throw new Error('Fant ikke ekstern datafil');
-        return res.text();
+        if (!res.ok) throw new Error('Fant ikke casebanken');
+        return res.json();
       })
-      .then((text) => {
-        const lines = text.trim().split('\n').slice(0, 300);
-        const parsed: ReferanseCase[] = lines.map((l) => {
-          try {
-            const j = JSON.parse(l);
-            return {
-              tittel: j.prosjektnavn || j.tittel || 'Innovasjonscase',
-              organisasjon: j.organisasjon || j.bransje || 'Offentlig/Privat',
-              oppnaaddResultat: j.maalt_resultat || j.beskrivelse_original || 'Dokumentert erfaring',
-              evidens: j.evidensstyrke || 'E2 Empirisk',
-              kilde: j.kilde,
-              kildeUrl: j.kilde_url
-            };
-          } catch {
-            return null;
-          }
-        }).filter(Boolean) as ReferanseCase[];
-
+      .then((rows: any[]) => {
+        const parsed: ReferanseCase[] = rows.map(c => ({
+          caseId: c.caseId, tittel: c.tittel, organisasjon: c.organisasjon,
+          oppnaaddResultat: c.resultat || 'Resultat er ikke dokumentert.',
+          problem: c.problem, mangler: c.mangler, evidens: c.evidens,
+          kilde: c.kilde, kildeUrl: c.kildeUrl,
+          bransje: c.bransje
+        }));
         if (parsed.length > 0) setCaser(parsed);
       })
       .catch(() => {
@@ -225,7 +215,6 @@ export default function App() {
 
   const samletInputTekst = `${dagensSituasjon} ${foreslaattLosning} ${eierSektorEffekt}`;
   const matchedeCaser = rangerCaser(samletInputTekst, caser, 3);
-  const antallTreffIDb = tellTreff(samletInputTekst, caser);
 
   // Kjøring av sensor til Steg 4 (direkte API eller student-proxy)
   const kjoerDirekteSensor = async (nokkelTilBruk?: string, overstyrtProxy?: string) => {
@@ -239,7 +228,7 @@ export default function App() {
           foreslaattLosning,
           eierSektorEffekt,
           svar,
-          caser: matchedeCaser
+          timerPerUke, kuttProsent, caser: matchedeCaser
         },
         apiKey: aktivNokkel,
         proxyUrl: aktivProxy
@@ -252,7 +241,7 @@ export default function App() {
         foreslaattLosning,
         eierSektorEffekt,
         svar,
-        caser: matchedeCaser
+        timerPerUke, kuttProsent, caser: matchedeCaser
       });
       setSensor(fallback);
     } finally {
@@ -287,7 +276,7 @@ export default function App() {
 
   // Eksportfunksjoner og Handoff
   const handoffPakke: HandoffPakke = {
-    input: { dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, caser: matchedeCaser },
+    input: { dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar, timerPerUke, kuttProsent, caser: matchedeCaser },
     svar,
     dom: { antallJa, niva: domNiva, tittel: domTittel },
     sensor: sensor || lokalSensorFallback({ dagensSituasjon, foreslaattLosning, eierSektorEffekt, svar }),
@@ -313,6 +302,7 @@ export default function App() {
   // Innlimt KI-vurdering og ekstern dialog
   const [innlimtTekst, setInnlimtTekst] = useState('');
   const [visInnlimingsBoks, setVisInnlimingsBoks] = useState(false);
+  const [visEksternVurdering, setVisEksternVurdering] = useState(false);
   const [innlimtSuksess, setInnlimtSuksess] = useState(false);
   const [eksternStatusMelding, setEksternStatusMelding] = useState<string | null>(null);
 
@@ -417,6 +407,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
     setSisteKjorteNokkel('');
     setInnlimtTekst('');
     setVisInnlimingsBoks(false);
+    setVisEksternVurdering(false);
     setEksternStatusMelding(null);
     setSteg(1);
   };
@@ -431,9 +422,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               <h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
                 Business Case-screening
               </h1>
-              <p className="mt-1 text-xs text-slate-500">
-                100 % uavhengig verktøy • {apiKey.trim() ? 'OpenAI gpt-4o-mini (direkte nøkkel)' : proxyUrl.trim() ? 'Student-proxy aktiv (0 kr for studenten)' : 'Lokal regelmotor (0 kr, offline)'}
-              </p>
+              <p className="mt-1 text-xs text-slate-500">Vurder idéen før dere bygger.</p>
             </div>
             <button
               type="button"
@@ -446,7 +435,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               title="Innstillinger for API-nøkkel og student-proxy"
             >
               <Settings className="h-4 w-4 text-slate-500" />
-              <span>{apiKey.trim() || proxyUrl.trim() ? 'Tilkobling aktiv' : 'Innstillinger'}</span>
+                  <span>{apiKey.trim() || proxyUrl.trim() ? 'KI-tilkobling' : 'Innstillinger'}</span>
             </button>
           </div>
 
@@ -470,13 +459,10 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" /> Felles Student-Proxy URL (anbefalt for klasserommet)
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" /> Student-proxy
                   </span>
                   {proxyUrl && <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded">Aktiv</span>}
                 </div>
-                <p className="text-slate-600 text-[11px]">
-                  Peker til en sikker Cloudflare Worker som holder din OpenAI-nøkkel hemmelig med rate-limit. Lar alle studenter trykke «Kjør KI-vurdering» uten å opprette konto eller taste inn nøkkel.
-                </p>
                 <div className="flex items-center gap-2 pt-0.5">
                   <input
                     type="url"
@@ -514,13 +500,10 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               <div className="space-y-1.5 pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <Key className="h-3.5 w-3.5 text-blue-600" /> Egen OpenAI API-nøkkel (valgfri for lærer / privat)
+                    <Key className="h-3.5 w-3.5 text-blue-600" /> Egen OpenAI-nøkkel
                   </span>
                   {apiKey && <span className="text-[10px] text-blue-700 font-semibold bg-blue-100 px-1.5 py-0.5 rounded">Aktiv</span>}
                 </div>
-                <p className="text-slate-600 text-[11px]">
-                  Lagres kun lokalt i din egen nettleser (localStorage) og overstyrer student-proxyen.
-                </p>
                 <div className="flex items-center gap-2 pt-0.5">
                   <input
                     type="password"
@@ -639,7 +622,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   rows={2}
                   value={dagensSituasjon}
                   onChange={(e) => setDagensSituasjon(e.target.value)}
-                  placeholder="Hva er problemet i dag? Ta med ett tall: tidsbruk, feilrate, nedetid eller volum."
+                  placeholder="Hva skjer i dag? Ta med ett tall."
                   className="mt-2 w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -653,7 +636,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   rows={2}
                   value={foreslaattLosning}
                   onChange={(e) => setForeslaattLosning(e.target.value)}
-                  placeholder="Hva skal KI eller verktøyet gjøre? For eksempel tekststøtte, bildeanalyse eller prediksjon."
+                  placeholder="Hva skal løsningen gjøre?"
                   className="mt-2 w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -667,7 +650,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   rows={2}
                   value={eierSektorEffekt}
                   onChange={(e) => setEierSektorEffekt(e.target.value)}
-                  placeholder="Hvem har ansvaret (for eksempel driftsleder eller seksjonsleder), og hva skal bli bedre?"
+                  placeholder="Hvem eier arbeidet, og hva skal bli bedre?"
                   className="mt-2 w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -676,7 +659,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               <div className="border-t border-slate-200 pt-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                    <TrendingUp className="h-4 w-4 text-emerald-600" /> DFØ Gevinstkalkyle mot Nullalternativet
+                    <TrendingUp className="h-4 w-4 text-emerald-600" /> Dine anslag
                   </span>
                   <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                     {dfoGevinst.gevinstkategori}
@@ -687,7 +670,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   <div className="rounded-lg bg-slate-50 p-3.5 border border-slate-200/70 space-y-2">
                     <div className="flex justify-between items-center text-xs font-medium text-slate-700">
                       <span className="flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-slate-500" /> Dagens manuelle tidsbruk:
+                        <Clock className="h-3.5 w-3.5 text-slate-500" /> Timer i dag
                       </span>
                       <span className={`font-bold ${timerPerUke === 0 ? 'text-amber-600' : 'text-slate-900'}`}>
                         {timerPerUke} t/uke {timerPerUke === 0 ? '(mangler)' : ''}
@@ -710,15 +693,13 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                       }}
                       className="w-full accent-blue-600 cursor-pointer"
                     />
-                    <p className="text-[11px] text-slate-500">
-                      {timerPerUke === 0 ? 'Mangler baseline (Portvakt 2 vil stoppe prosjektet).' : 'Manuelle timer brukt på oppgaven i dag (nullalternativ).'}
-                    </p>
+                    {timerPerUke === 0 && <p className="text-[11px] text-amber-700">Mangler måling av dagens nivå.</p>}
                   </div>
 
                   <div className="rounded-lg bg-slate-50 p-3.5 border border-slate-200/70 space-y-2">
                     <div className="flex justify-between items-center text-xs font-medium text-slate-700">
                       <span className="flex items-center gap-1.5">
-                        <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> Forventet tidsbesparelse:
+                        <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> Forventet kutt
                       </span>
                       <span className="font-bold text-slate-900">{kuttProsent}%</span>
                     </div>
@@ -731,9 +712,6 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                       onChange={(e) => setKuttProsent(Number(e.target.value))}
                       className="w-full accent-blue-600 cursor-pointer"
                     />
-                    <p className="text-[11px] text-slate-500">
-                      Andel av manuell tid løsningen kan avlaste.
-                    </p>
                   </div>
                 </div>
 
@@ -751,11 +729,11 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     <div className="text-lg font-bold text-emerald-800">
                       {dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr
                     </div>
-                    <div className="text-[11px] text-emerald-700">est. årlig verdi</div>
+                    <div className="text-[11px] text-emerald-700">årlig kapasitetsverdi</div>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 text-center">
-                  Beregnet med DFØ-sjablong (1 årsverk = 1 750 t = {STANDARD_AARSVERK_KR.toLocaleString('no-NO')} kr) over 46 arbeidsuker.
+                  DFØ-sjablong: 1 årsverk = 1 750 t / {STANDARD_AARSVERK_KR.toLocaleString('no-NO')} kr.
                 </p>
               </div>
             </div>
@@ -776,16 +754,6 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
         {/* STEG 2: AVKLARING */}
         {steg === 2 && (
           <section className="space-y-6">
-            <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs text-blue-900 flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Database className="h-4 w-4 text-blue-600" />
-                Erfaringsbasen har treff på <strong>{antallTreffIDb}</strong> caser for ditt fagområde.
-              </span>
-              <span className="font-semibold text-slate-700">
-                {antallJa} av 7 Ja
-              </span>
-            </div>
-
             {BLOKKER.map((blokk) => {
               const punkter = PORTVAKTER.filter((p) => p.blokk === blokk.nr);
               return (
@@ -796,10 +764,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                   <div className="divide-y divide-slate-100">
                     {punkter.map((p) => (
                       <div key={p.id} className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="max-w-md">
-                          <p className="text-sm font-semibold text-slate-900">{p.kort}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">{p.sporsmal}</p>
-                        </div>
+                        <p className="max-w-md text-sm font-semibold text-slate-900">{p.sporsmal}</p>
                         <div className="inline-flex rounded-lg border border-slate-200 p-1 bg-slate-50 shrink-0">
                           {(['ja', 'vet_ikke', 'nei'] as SvarVerdi[]).map((val) => {
                             const valgt = svar[p.id] === val;
@@ -871,38 +836,30 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     {domNiva === 'klar' ? <Check className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
                   </span>
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                      {antallJa} av 7 avklart
-                    </p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-600">{antallJa}/7 avklart</p>
                     <h2 className="text-xl font-bold text-slate-950 sm:text-2xl">{domTittel}</h2>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-xs font-semibold text-blue-900 shadow-sm">
-                    <Sparkles className="h-3.5 w-3.5 text-blue-600" />
-                    {studentEvaluering.modenhetNavn}
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-slate-300 bg-white/90 px-3 py-1 font-mono text-xs font-bold text-slate-900 shadow-sm">
-                    {studentEvaluering.totalscore}/100 poeng
-                  </span>
-                </div>
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-xs font-semibold text-blue-900 shadow-sm">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-600" /> {studentEvaluering.modenhetNavn}
+                </span>
               </div>
 
               {/* DFØ-Gevinstoppsummering i sjekklisten */}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-3.5 py-2 text-xs border border-slate-200/60">
                 <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                  <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> Beregnet DFØ-gevinst:
+                  <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> Dine anslag
                 </span>
                 <span className="font-medium text-slate-700">
-                  {dfoGevinst.timerFrigjortPerUke} t/uke ({dfoGevinst.aarsverkFrigjort} årsverk) • {dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr/år ({dfoGevinst.gevinstkategori})
+                  {dfoGevinst.timerFrigjortPerUke} t/uke • {dfoGevinst.aarsverkFrigjort} årsverk • {dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr/år
                 </span>
               </div>
 
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <div className="rounded-lg bg-white/80 p-4 border border-slate-200">
                   <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Dette har dere kontroll på
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Avklart
                   </p>
                   <ul className="mt-2.5 space-y-1.5 text-xs text-slate-700">
                     {PORTVAKTER.filter((p) => svar[p.id] === 'ja').map((p) => (
@@ -910,13 +867,13 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                         <span className="text-emerald-600">✓</span> {p.kort}
                       </li>
                     ))}
-                    {antallJa === 0 && <li className="text-slate-400">Ingen punkter avklart ennå</li>}
+                    {antallJa === 0 && <li className="text-slate-400">Ingen ennå</li>}
                   </ul>
                 </div>
 
                 <div className="rounded-lg bg-white/80 p-4 border border-slate-200">
                   <p className="text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
-                    <AlertTriangle className="h-4 w-4 text-amber-600" /> Dette må avklares
+                    <AlertTriangle className="h-4 w-4 text-amber-600" /> Må avklares
                   </p>
                   <ul className="mt-2.5 space-y-1.5 text-xs text-slate-700">
                     {PORTVAKTER.filter((p) => svar[p.id] !== 'ja').map((p) => (
@@ -924,10 +881,10 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                         <span className={svar[p.id] === 'nei' ? 'text-rose-600' : 'text-amber-500'}>
                           {svar[p.id] === 'nei' ? '✗' : '?'}
                         </span>
-                        {p.kort} ({svar[p.id] === 'nei' ? 'Mangler' : 'Uavklart'})
+                        {p.kort}
                       </li>
                     ))}
-                    {antallJa === 7 && <li className="text-emerald-600">Alle 7 punkter er avklart!</li>}
+                    {antallJa === 7 && <li className="text-emerald-600">Alt er avklart.</li>}
                   </ul>
                 </div>
               </div>
@@ -942,17 +899,29 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               >
                 <span className="flex items-center gap-2">
                   <Database className="h-4 w-4 text-blue-600" />
-                  {visKilder ? '▼ Skjul' : '▶ Se'} dokumenterte kilder og måltall fra caseregisteret ({matchedeCaser.length} relevante)
+                  {visKilder ? 'Skjul' : 'Se'} kilder ({matchedeCaser.length} av {caser.length.toLocaleString('no-NO')} dokumenterte caser)
                 </span>
-                {visKilder ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <span className="flex items-center gap-2 text-[11px] font-normal text-slate-500">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Casebank tilkoblet" />
+                  {caser.length > 3 ? `${caser.length.toLocaleString('no-NO')} caser` : 'Referansecaser'}
+                  {visKilder ? <ChevronDown className="h-4 w-4 text-slate-700" /> : <ChevronRight className="h-4 w-4 text-slate-700" />}
+                </span>
               </button>
 
               {visKilder && (
                 <div className="mt-4 space-y-3 border-t pt-3">
+                  <p className="text-[11px] text-slate-500">
+                    Søker automatisk i erfaringsbasen ({caser.length.toLocaleString('no-NO')} caser fra OECD og UK ATRS) etter lignende prosjekter.
+                  </p>
                   {matchedeCaser.map((c, i) => (
                     <div key={i} className="text-xs text-slate-600 space-y-1">
                       <p className="font-semibold text-slate-900">
                         {c.tittel} — <span className="font-normal text-slate-500">{c.organisasjon}</span>
+                        {c.bransje && (
+                          <span className="ml-2 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                            {c.bransje.replace('_', ' ')}
+                          </span>
+                        )}
                       </p>
                       <p className="text-slate-700">{c.oppnaaddResultat}</p>
                       {c.kildeUrl && (
@@ -985,141 +954,20 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
           </section>
         )}
 
-        {/* STEG 4: KI-SENSOR & EVALUERINGSARENA */}
+        {/* STEG 4: KI-SENSOR */}
         {steg === 4 && (
           <section className="space-y-6">
-            {/* 1. DETERMINISTISK FAKTAGRUNNLAG SOM FØLGER ROLIG OG ORDENTLIG MED */}
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                      Deterministisk Faktagrunnlag (Ufravikelig Fasit)
-                    </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Disse faktaene danner grunnmuren og kan aldri overprøves av språkmodellen.
-                    </p>
-                  </div>
-                </div>
-                <span className="self-start sm:self-auto text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                  {studentEvaluering.modenhetNavn} ({studentEvaluering.totalscore}/100 p)
-                </span>
+              <div className="flex items-center justify-between text-xs text-slate-700">
+                <span className="font-semibold">Dine anslag</span>
+                <span>{timerPerUke} t/uke · {kuttProsent}% kutt · {antallJa}/7 avklart</span>
               </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
-                  <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-slate-400" /> Målt Baseline
-                  </span>
-                  <p className="mt-1 font-bold text-slate-900 text-sm">{timerPerUke} timer / uke</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">{timerPerUke * 46} t/år i dagens prosess</p>
-                </div>
-
-                <div className="rounded-lg bg-emerald-50/60 p-3 border border-emerald-100">
-                  <span className="text-[11px] font-medium text-emerald-800 flex items-center gap-1">
-                    <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> DFØ Kapasitetsgevinst
-                  </span>
-                  <p className="mt-1 font-bold text-emerald-900 text-sm">{dfoGevinst.timerFrigjortPerUke} t/uke frigjort</p>
-                  <p className="text-[11px] text-emerald-700 mt-0.5">{dfoGevinst.aarsverkFrigjort} årsverk ({kuttProsent}% kutt)</p>
-                </div>
-
-                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
-                  <span className="text-[11px] font-medium text-slate-500">Est. Årlig Verdi</span>
-                  <p className="mt-1 font-bold text-slate-900 text-sm">{dfoGevinst.aarligKapasitetsverdiKr.toLocaleString('no-NO')} kr/år</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">{dfoGevinst.gevinstkategori}</p>
-                </div>
-
-                <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
-                  <span className="text-[11px] font-medium text-slate-500">Portvakt-status</span>
-                  <p className="mt-1 font-bold text-slate-900 text-sm">{antallJa} av 7 avklart ({domTittel})</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Eier: {svar.eier} • Baseline: {svar.baseline}</p>
-                </div>
-              </div>
-
-              {/* Rask sammendrag av caset */}
-              <div className="rounded-lg bg-slate-50 p-3 border border-slate-100 text-xs space-y-1.5 text-slate-700">
-                <p><strong className="text-slate-900">Dagens situasjon:</strong> {dagensSituasjon}</p>
-                <p><strong className="text-slate-900">Foreslått løsning:</strong> {foreslaattLosning}</p>
-                <p><strong className="text-slate-900">Forankring & effekt:</strong> {eierSektorEffekt}</p>
-              </div>
-            </div>
-
-            {/* 2. HANDLINGSARENA FOR KI-VURDERING */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-950 flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-blue-600" />
-                    Generer eller oppdater KI-vurdering
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Språkmodellen stresstester caset med de deterministiske faktaene som fast ramme.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* SPOR 1: DIREKTE I NETTLESEREN MED OPENAI ELLER STUDENT-PROXY */}
-                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3 flex flex-col justify-between">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <Key className="h-3.5 w-3.5 text-blue-600" />
-                        {apiKey.trim()
-                          ? 'Spor 1: Egen OpenAI API-nøkkel'
-                          : proxyUrl.trim()
-                          ? 'Spor 1: Felles Student-Proxy'
-                          : 'Spor 1: Direkte API / Student-Proxy'}
-                      </span>
-                      {apiKey.trim() ? (
-                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded">
-                          Egen nøkkel aktiv
-                        </span>
-                      ) : proxyUrl.trim() ? (
-                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
-                          Student-proxy aktiv (0 kr)
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-slate-600">
-                      {apiKey.trim()
-                        ? 'Kjører mot OpenAI gpt-4o-mini med din egen API-nøkkel lagret lokalt.'
-                        : proxyUrl.trim()
-                        ? 'Kjører via felles Cloudflare Worker-proxy. 100 % gratis og umiddelbart for studenten.'
-                        : 'Kjør med OpenAI gpt-4o-mini. Legg inn API-nøkkel eller student-proxy URL under.'}
-                    </p>
-                    {!apiKey.trim() && !proxyUrl.trim() && (
-                      <div className="pt-1">
-                        <input
-                          type="password"
-                          placeholder="Lim inn OpenAI API-nøkkel (sk-proj-...) eller Worker URL"
-                          value={apiKeyInput}
-                          onChange={(e) => setApiKeyInput(e.target.value)}
-                          className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <button
+              <button
                     type="button"
                     disabled={lasterSensor}
-                    onClick={() => {
-                      if (!apiKey.trim() && !proxyUrl.trim() && apiKeyInput.trim()) {
-                        if (apiKeyInput.trim().startsWith('http')) {
-                          lagreProxyUrl(apiKeyInput.trim());
-                          kjoerDirekteSensor(undefined, apiKeyInput.trim());
-                        } else {
-                          lagreApiKey(apiKeyInput.trim());
-                          kjoerDirekteSensor(apiKeyInput.trim());
-                        }
-                      } else {
-                        kjoerDirekteSensor();
-                      }
-                    }}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                  >
+                    onClick={() => kjoerDirekteSensor()}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
                     {lasterSensor ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyserer med KI…
@@ -1127,25 +975,19 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     ) : (
                       <>
                         <Sparkles className="h-3.5 w-3.5" />
-                        {apiKey.trim()
-                          ? 'Kjør OpenAI-vurdering (egen nøkkel)'
-                          : proxyUrl.trim()
-                          ? 'Kjør KI-vurdering (via student-proxy)'
-                          : 'Kjør KI-vurdering'}
+                        Vurder prosjektet
                       </>
                     )}
-                  </button>
-                </div>
-
-                {/* SPOR 2: BRUK CHATGPT ELLER CLAUDE (0 KR) */}
-                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3 flex flex-col justify-between">
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <ExternalLink className="h-3.5 w-3.5 text-blue-600" /> Spor 2: Bruk ChatGPT eller Claude (0 kr)
-                    </span>
-                    <p className="text-xs text-slate-600">
-                      Kopierer full faktarigg og åpner ChatGPT eller Claude i ny fane. Lim svaret inn under.
-                    </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisEksternVurdering(!visEksternVurdering)}
+                className="text-xs font-medium text-blue-700 hover:underline"
+              >
+                {visEksternVurdering ? 'Skjul eksternt alternativ' : 'Bruk ChatGPT eller Claude'}
+              </button>
+              {visEksternVurdering && (
+                <div className="space-y-3 border-t border-slate-100 pt-3">
                     <div className="flex gap-2 pt-1">
                       <button
                         type="button"
@@ -1162,8 +1004,6 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                         <ExternalLink className="h-3 w-3 text-slate-500" /> Åpne i Claude ↗
                       </button>
                     </div>
-                  </div>
-
                   <button
                     type="button"
                     onClick={() => setVisInnlimingsBoks(!visInnlimingsBoks)}
@@ -1173,7 +1013,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     {visInnlimingsBoks ? 'Skjul innlimingsfelt' : 'Lim inn vurdering fra ChatGPT/Claude'}
                   </button>
                 </div>
-              </div>
+              )}
 
               {eksternStatusMelding && (
                 <div className="rounded-lg bg-emerald-50 p-2.5 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-1.5 font-medium">
@@ -1185,12 +1025,7 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               {visInnlimingsBoks && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <label className="text-xs font-bold text-slate-900">
-                      Lim inn teksten fra ChatGPT eller Claude her:
-                    </label>
-                    <span className="text-[11px] text-slate-500">
-                      Appen trekker ut konklusjon, styrker, gap og testoppsett automatisk.
-                    </span>
+                    <label className="text-xs font-bold text-slate-900">Lim inn vurderingen</label>
                   </div>
                   <textarea
                     value={innlimtTekst}
@@ -1207,11 +1042,11 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                       className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                     >
                       <Send className="h-3.5 w-3.5" />
-                      Bruk denne KI-vurderingen i caset
+                      Bruk vurderingen
                     </button>
                     {innlimtSuksess && (
                       <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                        <Check className="h-4 w-4" /> KI-vurdering oppdatert!
+                        <Check className="h-4 w-4" /> Oppdatert
                       </span>
                     )}
                   </div>
@@ -1223,15 +1058,14 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
             {lasterSensor ? (
               <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm space-y-3">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
-                <p className="text-sm font-semibold text-slate-900">Analyserer caset med sensor-motoren…</p>
-                <p className="text-xs text-slate-500">Stresstester sjekklistegap og referanser (0 floskler).</p>
+                <p className="text-sm font-semibold text-slate-900">Vurderer prosjektet…</p>
               </div>
             ) : sensor ? (
               <div className="space-y-6">
                 {/* 1-setnings konklusjon med opprinnelsesmerke */}
                 <div className="rounded-xl border-2 border-blue-500 bg-blue-50/70 p-5 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-blue-800">
-                    <span>Sensorens Hovedkonklusjon</span>
+                    <span>Vurdering</span>
                     <span className="font-semibold text-slate-600 lowercase bg-white/90 px-2.5 py-0.5 rounded border border-blue-200">
                       {sensor.kilde === 'openai'
                         ? 'OpenAI gpt-4o-mini (direkte)'
@@ -1251,6 +1085,31 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                     </p>
                   )}
                 </div>
+
+                {sensor.begrunnelse && <p className="text-sm text-slate-700">{sensor.begrunnelse}</p>}
+                {sensor.datagrunnlag && (
+                  <p className="text-xs text-slate-600">
+                    {sensor.datagrunnlag.antallTreff} kildetreff · {sensor.datagrunnlag.kilde === 'supabase' ? 'Database' : `Casebank (${sensor.datagrunnlag.antallCaser})`}
+                    {sensor.datagrunnlag.merknad && ` · ${sensor.datagrunnlag.merknad}`}
+                  </p>
+                )}
+                {!!sensor.evidens?.length && (
+                  <details className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <summary className="cursor-pointer font-semibold">Kilder i vurderingen</summary>
+                    <div className="mt-3 space-y-4">
+                      {sensor.evidens.map(c => (
+                        <div key={c.caseId} className="space-y-1">
+                          <p className="font-semibold">{c.tittel} · {c.organisasjon}</p>
+                          <p>Kildefunn: {c.resultat || c.oppnaaddResultat || 'Resultat er ikke dokumentert.'}</p>
+                          <p>Vurdering: {c.relevans}</p>
+                          <p>Begrensning: {c.begrensning}</p>
+                          {c.mangler && <p>Ikke dokumentert: {c.mangler}</p>}
+                          {c.kildeUrl && /^https?:\/\//i.test(c.kildeUrl) && <a href={c.kildeUrl} target="_blank" rel="noreferrer" className="text-blue-700 underline">Åpne kilde</a>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
 
                 {/* 3 Harde Datakort */}
                 <div className="grid gap-4 md:grid-cols-3">
@@ -1328,8 +1187,8 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
         {steg === 5 && (
           <section className="space-y-6">
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-bold text-slate-950">Gjør dette denne uken</h2>
-              <div className="space-y-3">
+              <h2 className="text-lg font-bold text-slate-950">Denne uken</h2>
+              <div className="space-y-2">
                 {ukeoppgaver.map((oppg, idx) => {
                   const erFerdig = oppgaverFerdig[oppg.id];
                   return (
@@ -1347,9 +1206,6 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
                         <p className={`font-semibold text-slate-900 ${erFerdig ? 'line-through text-slate-400' : ''}`}>
                           {idx + 1}. {oppg.tittel}
                         </p>
-                        <p className={`mt-0.5 text-slate-600 ${erFerdig ? 'line-through text-slate-400' : ''}`}>
-                          {oppg.tekst}
-                        </p>
                       </div>
                     </label>
                   );
@@ -1357,27 +1213,23 @@ Stoppregel: ${sensor?.testoppsett?.[2] || 'Avbryt hvis tidsbruk overstiger dagen
               </div>
 
               {/* Smidig FoU-Faseplan (MVP-Roadmap) */}
-              <div className="border-t pt-5 mt-6 space-y-3">
+              <div className="border-t pt-5 mt-6 space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-emerald-600" /> Smidig FoU-Leveranseplan (MVP 0 til MVP 2)
+                    <Sparkles className="h-4 w-4 text-emerald-600" /> Videre plan
                   </h3>
                   <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                     {studentEvaluering.modenhetNavn}
                   </span>
                 </div>
-                <div className="grid gap-2.5">
+                <div className="grid gap-2">
                   {studentEvaluering.mvpPlan.map((fase, i) => (
-                    <div key={i} className="rounded-lg bg-slate-50 border border-slate-200/80 p-3 space-y-1 text-xs">
-                      <p className="font-semibold text-slate-900 text-xs">
-                        <span className="text-blue-700 font-bold">{fase.steg}:</span> {fase.tittel}
+                    <div key={i} className="rounded-lg bg-slate-50 border border-slate-200/80 p-3 text-xs">
+                      <p className="font-semibold text-slate-900">
+                        <span className="text-blue-700">{fase.steg}</span> · {fase.tittel}
                       </p>
-                      <p className="text-slate-700">
-                        <strong className="text-emerald-700">Skal bevises:</strong> {fase.hvaSkalBevises}
-                      </p>
-                      <p className="text-slate-500">
-                        <strong className="text-slate-600">Utelates (mockes):</strong> {fase.hvaSkalUtelates}
-                      </p>
+                      <p className="mt-1 text-slate-600">{fase.hvaSkalBevises}</p>
+                      <p className="mt-1 text-slate-500">{fase.hvaSkalUtelates}</p>
                     </div>
                   ))}
                 </div>

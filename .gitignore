@@ -28,6 +28,7 @@ __pycache__/
 *.pyc
 
 # Large raw data dumps (kept locally, seed CSV tracked)
-public/data/
+public/data/*
+!public/data/case-index.json
 supabase/data/cases.csv
 supabase/data/evidenskart.csv
