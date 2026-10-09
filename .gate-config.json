@@ -1,0 +1,8 @@
+{
+  "testCommand": "npm test",
+  "buildCommand": "npm run build",
+  "buildArtifacts": [
+    "dist/index.html",
+    "dist/data/case-index.json"
+  ]
+}

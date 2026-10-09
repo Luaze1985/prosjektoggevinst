@@ -19,7 +19,7 @@ const cases = fs.readFileSync(path.join(root, 'public/data/cases.jsonl'), 'utf8'
     mangler: compact(c.manglende_dokumentasjon),
     evidens: c.evidensstyrke,
     kilde: c.kilde,
-    kildeUrl: c.kilde_url
+    kildeUrl: typeof c.kilde_url === 'string' && /^https?:\/\//i.test(c.kilde_url.trim()) ? c.kilde_url.trim() : ''
   }));
 if (!cases.length || cases.some(c => !c.caseId || !c.tittel)) throw new Error('Case-ID/tittel mangler.');
 if (new Set(cases.map(c => c.caseId)).size !== cases.length) throw new Error('Dupliserte case-ID-er.');

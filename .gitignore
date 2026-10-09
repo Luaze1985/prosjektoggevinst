@@ -32,3 +32,6 @@ public/data/*
 !public/data/case-index.json
 supabase/data/cases.csv
 supabase/data/evidenskart.csv
+
+# Audit logs
+gate-log.jsonl
